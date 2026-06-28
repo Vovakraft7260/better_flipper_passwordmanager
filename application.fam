@@ -1,0 +1,12 @@
+App(
+    appid="password_manager_v2",
+    name="Password Manager v2",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="password_manager_app",
+    requires=["gui", "notification"],
+    stack_size=4 * 1024,
+    fap_category="Tools",
+    fap_author="W-guy (fork)",
+    fap_version="2.0",
+    fap_description="Password manager: multiple lists, edit, generator, keyboard layouts, USB-HID typing",
+)
