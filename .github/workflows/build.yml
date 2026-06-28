@@ -1,0 +1,23 @@
+name: Build Password Manager FAP
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: build
+        uses: flipperdevices/flipperzero-ufbt-action@dev
+        with:
+          # Match your Momentum dev firmware so the API version lines up
+          sdk-channel: dev
+          sdk-index-url: https://up.momentum-fw.dev/firmware/directory.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: password_manager-fap
+          path: ${{ steps.build.outputs.fap-artifacts }}
