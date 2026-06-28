@@ -6,6 +6,7 @@ App(
     requires=["gui", "notification"],
     stack_size=4 * 1024,
     fap_category="Tools",
+    fap_icon="icon.png",
     fap_author="W-guy (fork)",
     fap_version="2.0",
     fap_description="Password manager: multiple lists, edit, generator, keyboard layouts, USB-HID typing",
