@@ -891,8 +891,6 @@ static void rebuild_config_list(App* app) {
     variable_item_list_set_enter_callback(app->config_list, config_enter_cb, app);
 }
 
-static void show_layout_pick(App* app);
-
 /* ---------------- layout picker ---------------- */
 #define LAYOUT_US 0xFFFD
 
