@@ -537,25 +537,40 @@ static void entries_draw(Canvas* canvas, void* model) {
     canvas_draw_str(canvas, 2, 10, app->list_name);
     canvas_draw_line(canvas, 0, 12, 128, 12);
 
+    const uint32_t rows = 3; /* leave room for the bottom hint bar */
     if(app->cred_count == 0) {
         canvas_draw_str(canvas, 2, 30, "(empty)");
         if(app->mode == ModeEdit) canvas_draw_str(canvas, 2, 44, "OK: add entry");
-        return;
+    } else {
+        if(app->sel < app->top) app->top = app->sel;
+        if(app->sel >= app->top + rows) app->top = app->sel - rows + 1;
+        for(uint32_t r = 0; r < rows; r++) {
+            uint32_t idx = app->top + r;
+            if(idx >= app->cred_count) break;
+            uint32_t y = 24 + r * 11;
+            if(idx == app->sel) {
+                canvas_draw_box(canvas, 0, y - 9, 128, 11);
+                canvas_set_color(canvas, ColorWhite);
+            }
+            canvas_draw_str(canvas, 3, y, app->creds[idx].name);
+            canvas_set_color(canvas, ColorBlack);
+        }
     }
 
-    const uint32_t rows = 4;
-    if(app->sel < app->top) app->top = app->sel;
-    if(app->sel >= app->top + rows) app->top = app->sel - rows + 1;
-
-    for(uint32_t r = 0; r < rows; r++) {
-        uint32_t idx = app->top + r;
-        if(idx >= app->cred_count) break;
-        uint32_t y = 24 + r * 11;
-        if(idx == app->sel) {
-            canvas_draw_box(canvas, 0, y - 9, 128, 11);
-            canvas_set_color(canvas, ColorWhite);
-        }
-        canvas_draw_str(canvas, 3, y, app->creds[idx].name);
+    /* bottom-right "config >" hint (Saved mode only - that's where L/R works) */
+    if(app->mode == ModeSaved) {
+        const char* label = "config";
+        uint16_t tw = canvas_string_width(canvas, label);
+        uint8_t boxw = tw + 14;
+        uint8_t boxh = 11;
+        uint8_t bx = 128 - boxw;
+        uint8_t by = 64 - boxh;
+        canvas_draw_box(canvas, bx, by, boxw, boxh);
+        canvas_set_color(canvas, ColorWhite);
+        canvas_draw_str(canvas, bx + 3, by + 8, label);
+        /* right-pointing arrow, apex points right */
+        uint8_t ax = bx + 3 + tw + 5;
+        canvas_draw_triangle(canvas, ax, by + boxh / 2, 5, 4, CanvasDirectionLeftToRight);
         canvas_set_color(canvas, ColorBlack);
     }
 }
