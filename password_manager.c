@@ -55,6 +55,16 @@ static const char GEN_UPPER[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 static const char GEN_DIGIT[] = "0123456789";
 static const char GEN_SYM[]   = "!#$%^&*.-_"; /* same set as passgen */
 
+/* start-delay options (ms) shown in config */
+static const uint32_t START_DELAYS[] = {0, 10, 20, 50, 100, 150, 250, 500, 1000};
+#define START_DELAY_COUNT (sizeof(START_DELAYS) / sizeof(START_DELAYS[0]))
+
+static uint8_t start_delay_index(uint32_t v) {
+    for(uint8_t i = 0; i < START_DELAY_COUNT; i++)
+        if(START_DELAYS[i] == v) return i;
+    return 0;
+}
+
 typedef struct {
     char name[NAME_LEN];
     char username[FIELD_LEN];
@@ -337,46 +347,46 @@ static uint16_t key_for_char(char c) {
     return HID_ASCII_TO_KEY(c);
 }
 
+static void type_one(uint16_t k, uint32_t d) {
+    if(!k) return;
+    furi_hal_hid_kb_press(k);
+    furi_delay_ms(d);
+    furi_hal_hid_kb_release(k);
+    furi_delay_ms(d);
+}
+
+static void type_str(const char* s, uint32_t d) {
+    for(const char* p = s; *p; p++) type_one(key_for_char(*p), d);
+}
+
 static void type_credential(App* app, const Credential* cr) {
     FuriHalUsbInterface* prev = furi_hal_usb_get_config();
     furi_hal_usb_unlock();
     if(!furi_hal_usb_set_config(&usb_hid, NULL)) return;
-    furi_delay_ms(200); /* enumerate */
+
+    /* Wait until the host actually enumerates the keyboard before typing, so
+       the opening characters aren't dropped (the "first attempt is partial"
+       bug). Poll up to ~2s, then settle briefly. */
+    uint32_t waited = 0;
+    while(!furi_hal_hid_is_connected() && waited < 2000) {
+        furi_delay_ms(20);
+        waited += 20;
+    }
+    furi_delay_ms(50); /* settle after the host reports ready */
+
     if(app->config.start_delay) furi_delay_ms(app->config.start_delay);
 
-    uint32_t d = app->config.key_delay ? app->config.key_delay : 5;
+    uint32_t d = app->config.key_delay < 5 ? 5 : app->config.key_delay;
 
     if(cr->username[0]) {
-        for(const char* p = cr->username; *p; p++) {
-            uint16_t k = key_for_char(*p);
-            if(!k) continue;
-            furi_hal_hid_kb_press(k);
-            furi_delay_ms(d);
-            furi_hal_hid_kb_release(k);
-            furi_delay_ms(d);
-        }
-        if(app->config.tab_between) {
-            furi_hal_hid_kb_press(HID_KEYBOARD_TAB);
-            furi_delay_ms(d);
-            furi_hal_hid_kb_release(HID_KEYBOARD_TAB);
-            furi_delay_ms(d);
-        }
+        type_str(cr->username, d);
+        if(app->config.tab_between) type_one(HID_KEYBOARD_TAB, d);
     }
-    for(const char* p = cr->password; *p; p++) {
-        uint16_t k = key_for_char(*p);
-        if(!k) continue;
-        furi_hal_hid_kb_press(k);
-        furi_delay_ms(d);
-        furi_hal_hid_kb_release(k);
-        furi_delay_ms(d);
-    }
-    if(app->config.enter_at_end) {
-        furi_hal_hid_kb_press(HID_KEYBOARD_RETURN);
-        furi_delay_ms(d);
-        furi_hal_hid_kb_release(HID_KEYBOARD_RETURN);
-    }
+    type_str(cr->password, d);
+    if(app->config.enter_at_end) type_one(HID_KEYBOARD_RETURN, d);
+
     furi_hal_hid_kb_release_all();
-    furi_delay_ms(50);
+    furi_delay_ms(150); /* let final keystrokes flush before switching USB back */
     furi_hal_usb_set_config(prev, NULL);
 }
 
@@ -856,7 +866,7 @@ static void cfg_delay_cb(VariableItem* item) {
 }
 static void cfg_start_cb(VariableItem* item) {
     App* app = variable_item_get_context(item);
-    app->config.start_delay = variable_item_get_current_value_index(item) * 250; /* 0..2000 */
+    app->config.start_delay = START_DELAYS[variable_item_get_current_value_index(item)];
     char b[10];
     snprintf(b, sizeof(b), "%lums", (unsigned long)app->config.start_delay);
     variable_item_set_current_value_text(item, b);
@@ -894,8 +904,9 @@ static void rebuild_config_list(App* app) {
     snprintf(b, sizeof(b), "%lums", (unsigned long)app->config.key_delay);
     variable_item_set_current_value_text(it, b);
 
-    it = variable_item_list_add(app->config_list, "Start delay", 9, cfg_start_cb, app);
-    variable_item_set_current_value_index(it, app->config.start_delay / 250);
+    it = variable_item_list_add(
+        app->config_list, "Start delay", START_DELAY_COUNT, cfg_start_cb, app);
+    variable_item_set_current_value_index(it, start_delay_index(app->config.start_delay));
     snprintf(b, sizeof(b), "%lums", (unsigned long)app->config.start_delay);
     variable_item_set_current_value_text(it, b);
 
