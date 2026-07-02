@@ -152,6 +152,10 @@ typedef struct {
     /* confirm action target */
     uint8_t confirm_what; /* 1 = delete entry, 2 = delete list */
     uint32_t config_from; /* view to return to when leaving config */
+
+    /* USB HID state (keep the keyboard mode active while app runs) */
+    FuriHalUsbInterface* usb_prev;
+    bool hid_active;
 } App;
 
 static App* g_app = NULL;
@@ -342,6 +346,15 @@ static void load_layout(App* app) {
 }
 
 static uint16_t key_for_char(char c) {
+    /* Uppercase letters: build from the (known-good) lowercase key plus an
+       explicit shift bit. This avoids depending on the layout file's uppercase
+       / modifier encoding, which differs between firmwares and was making
+       uppercase come out lowercase. */
+    if(c >= 'A' && c <= 'Z') {
+        char lower = (char)(c - 'A' + 'a');
+        uint16_t base = layout_loaded ? layout_table[(uint8_t)lower] : HID_ASCII_TO_KEY(lower);
+        return (uint16_t)(base | KEY_MOD_LEFT_SHIFT);
+    }
     uint8_t idx = (uint8_t)c;
     if(layout_loaded && idx < 128) return layout_table[idx];
     return HID_ASCII_TO_KEY(c);
@@ -360,19 +373,22 @@ static void type_str(const char* s, uint32_t d) {
 }
 
 static void type_credential(App* app, const Credential* cr) {
-    FuriHalUsbInterface* prev = furi_hal_usb_get_config();
-    furi_hal_usb_unlock();
-    if(!furi_hal_usb_set_config(&usb_hid, NULL)) return;
-
-    /* Wait until the host actually enumerates the keyboard before typing, so
-       the opening characters aren't dropped (the "first attempt is partial"
-       bug). Poll up to ~2s, then settle briefly. */
-    uint32_t waited = 0;
-    while(!furi_hal_hid_is_connected() && waited < 2000) {
-        furi_delay_ms(20);
-        waited += 20;
+    /* Switch to keyboard mode once and stay there while the app runs. Only the
+       first type waits for the host to enumerate; later ones are instant and
+       race-free, which fixes both dropped opening characters and the
+       "types from the middle" problem on repeat attempts. */
+    if(!app->hid_active) {
+        app->usb_prev = furi_hal_usb_get_config();
+        furi_hal_usb_unlock();
+        if(!furi_hal_usb_set_config(&usb_hid, NULL)) return;
+        uint32_t waited = 0;
+        while(!furi_hal_hid_is_connected() && waited < 2000) {
+            furi_delay_ms(20);
+            waited += 20;
+        }
+        furi_delay_ms(150); /* settle after the host reports ready */
+        app->hid_active = true;
     }
-    furi_delay_ms(50); /* settle after the host reports ready */
 
     if(app->config.start_delay) furi_delay_ms(app->config.start_delay);
 
@@ -386,8 +402,6 @@ static void type_credential(App* app, const Credential* cr) {
     if(app->config.enter_at_end) type_one(HID_KEYBOARD_RETURN, d);
 
     furi_hal_hid_kb_release_all();
-    furi_delay_ms(150); /* let final keystrokes flush before switching USB back */
-    furi_hal_usb_set_config(prev, NULL);
 }
 
 /* ---------------- generator ---------------- */
@@ -777,6 +791,9 @@ static void show_text(App* app, EditField field, const char* preset) {
     else if(field == FieldListName) hdr = "New list name";
     text_input_reset(app->text_input);
     text_input_set_header_text(app->text_input, hdr);
+    /* username/password may be left blank; name and list name are required */
+    size_t minlen = (field == FieldName || field == FieldListName) ? 1 : 0;
+    text_input_set_minimum_length(app->text_input, minlen);
     text_input_set_result_callback(
         app->text_input, text_done_cb, app, app->text_buf, sizeof(app->text_buf), false);
     view_dispatcher_switch_to_view(app->vd, ViewText);
@@ -1056,6 +1073,11 @@ static App* app_alloc(void) {
 }
 
 static void app_free(App* app) {
+    /* restore USB mode if we switched to keyboard */
+    if(app->hid_active) {
+        furi_hal_hid_kb_release_all();
+        furi_hal_usb_set_config(app->usb_prev, NULL);
+    }
     view_dispatcher_remove_view(app->vd, ViewMenu);
     view_dispatcher_remove_view(app->vd, ViewListPick);
     view_dispatcher_remove_view(app->vd, ViewActions);
